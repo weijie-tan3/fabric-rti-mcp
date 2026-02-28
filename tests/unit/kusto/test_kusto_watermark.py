@@ -105,7 +105,10 @@ class TestBuildWatermark:
             watermark = build_watermark()
             data = json.loads(watermark[3:].strip())
             keys = list(data.keys())
-            # Default keys come first, then custom keys sorted
+            # Default keys come first
+            assert keys[0] == "fabric_rti_mcp_version"
+            assert keys[1] == "user"
+            # Custom keys are sorted alphabetically after default keys
             assert keys.index("a_key") < keys.index("z_key")
 
 
