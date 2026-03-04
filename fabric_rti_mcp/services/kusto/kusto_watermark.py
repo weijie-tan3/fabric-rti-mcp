@@ -14,11 +14,15 @@ def _sanitize_value(value: str) -> str:
 
 
 def _resolve_custom_watermark(custom_watermark_json: str) -> dict[str, str]:
-    """Resolve custom watermark entries from a JSON mapping of keys to environment variable names.
+    """Resolve custom watermark entries from a JSON mapping.
 
-    :param custom_watermark_json: JSON string mapping custom keys to env var names,
-        e.g. '{"team": "TEAM_NAME", "request_id": "REQUEST_ID"}'.
-    :return: Resolved dict mapping custom keys to the env var values.
+    Values can be either:
+    - A literal string (used as-is), e.g. ``"my-team"``
+    - An ``env:`` prefixed string to resolve from an environment variable, e.g. ``"env:MY_APP_ID"``
+
+    :param custom_watermark_json: JSON string, e.g.
+        ``'{"team": "my-team", "app_id": "env:MY_APP_ID"}'``.
+    :return: Resolved dict mapping custom keys to their final values.
     """
     try:
         mapping = json.loads(custom_watermark_json)
@@ -27,17 +31,18 @@ def _resolve_custom_watermark(custom_watermark_json: str) -> dict[str, str]:
         return {}
 
     if not isinstance(mapping, dict):
-        logger.error("Custom watermark must be a JSON object mapping keys to environment variable names.")
+        logger.error("Custom watermark must be a JSON object mapping keys to values.")
         return {}
 
     resolved: dict[str, str] = {}
-    for key, env_var_name in mapping.items():
-        if not isinstance(env_var_name, str):
+    for key, value in mapping.items():
+        if not isinstance(value, str):
             logger.warning(f"Custom watermark value for '{key}' is not a string, skipping.")
             continue
-        env_value = os.getenv(env_var_name, "")
-        if env_value:
-            resolved[key] = _sanitize_value(env_value)
+        resolved_value = os.getenv(value[4:], "") if value.startswith("env:") else value
+        sanitized = _sanitize_value(resolved_value)
+        if sanitized:
+            resolved[key] = sanitized
     return resolved
 
 
@@ -74,5 +79,11 @@ def build_watermark() -> str:
 
 
 def add_watermark(query: str) -> str:
-    """Prepend a watermark comment to a KQL query."""
+    """Prepend a watermark comment to a KQL query.
+
+    Control commands (starting with '.') cannot have comments prepended,
+    so they are returned unchanged.
+    """
+    if query.lstrip().startswith("."):
+        return query
     return build_watermark() + query

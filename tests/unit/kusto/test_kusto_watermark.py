@@ -31,13 +31,22 @@ class TestSanitizeValue:
 class TestResolveCustomWatermark:
     def test_resolves_env_vars(self) -> None:
         with patch.dict(os.environ, {"TEAM_NAME": "data-platform", "REQ_ID": "abc123"}):
-            result = _resolve_custom_watermark('{"team": "TEAM_NAME", "request_id": "REQ_ID"}')
+            result = _resolve_custom_watermark('{"team": "env:TEAM_NAME", "request_id": "env:REQ_ID"}')
             assert result == {"team": "data-platform", "request_id": "abc123"}
 
+    def test_literal_values_used_as_is(self) -> None:
+        result = _resolve_custom_watermark('{"team": "my-team", "app": "my-app"}')
+        assert result == {"team": "my-team", "app": "my-app"}
+
+    def test_mixed_literal_and_env(self) -> None:
+        with patch.dict(os.environ, {"MY_APP_ID": "cool-app-123"}):
+            result = _resolve_custom_watermark('{"team": "data-eng", "app_id": "env:MY_APP_ID"}')
+            assert result == {"team": "data-eng", "app_id": "cool-app-123"}
+
     def test_skips_missing_env_vars(self) -> None:
-        with patch.dict(os.environ, {"TEAM_NAME": "data-platform"}, clear=True):
-            result = _resolve_custom_watermark('{"team": "TEAM_NAME", "missing": "NONEXISTENT_VAR"}')
-            assert result == {"team": "data-platform"}
+        with patch.dict(os.environ, {}, clear=True):
+            result = _resolve_custom_watermark('{"missing": "env:NONEXISTENT_VAR"}')
+            assert result == {}
 
     def test_invalid_json_returns_empty(self) -> None:
         result = _resolve_custom_watermark("not-json")
@@ -53,8 +62,12 @@ class TestResolveCustomWatermark:
 
     def test_sanitizes_resolved_values(self) -> None:
         with patch.dict(os.environ, {"DIRTY_VAR": "hello\nworld"}):
-            result = _resolve_custom_watermark('{"key": "DIRTY_VAR"}')
+            result = _resolve_custom_watermark('{"key": "env:DIRTY_VAR"}')
             assert result == {"key": "hello world"}
+
+    def test_sanitizes_literal_values(self) -> None:
+        result = _resolve_custom_watermark('{"key": "hello\\nworld"}')
+        assert result == {"key": "hello world"}
 
 
 class TestBuildWatermark:
@@ -83,7 +96,7 @@ class TestBuildWatermark:
             {
                 "USER": "testuser",
                 "TEAM_NAME": "data-platform",
-                CUSTOM_WATERMARK_ENV_VAR: '{"team": "TEAM_NAME"}',
+                CUSTOM_WATERMARK_ENV_VAR: '{"team": "env:TEAM_NAME"}',
             },
         ):
             watermark = build_watermark()
@@ -92,6 +105,19 @@ class TestBuildWatermark:
             assert data["user"] == "testuser"
             assert "fabric_rti_mcp_version" in data
 
+    def test_custom_watermark_literal_entries(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "USER": "testuser",
+                CUSTOM_WATERMARK_ENV_VAR: '{"team": "my-team"}',
+            },
+        ):
+            watermark = build_watermark()
+            data = json.loads(watermark[3:].strip())
+            assert data["team"] == "my-team"
+            assert data["user"] == "testuser"
+
     def test_custom_watermark_keys_sorted(self) -> None:
         with patch.dict(
             os.environ,
@@ -99,7 +125,7 @@ class TestBuildWatermark:
                 "USER": "testuser",
                 "VAR_Z": "z_value",
                 "VAR_A": "a_value",
-                CUSTOM_WATERMARK_ENV_VAR: '{"z_key": "VAR_Z", "a_key": "VAR_A"}',
+                CUSTOM_WATERMARK_ENV_VAR: '{"z_key": "env:VAR_Z", "a_key": "env:VAR_A"}',
             },
         ):
             watermark = build_watermark()
