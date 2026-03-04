@@ -79,11 +79,14 @@ def build_watermark() -> str:
 
 
 def add_watermark(query: str) -> str:
-    """Prepend a watermark comment to a KQL query.
+    """Add a watermark comment to a KQL query or control command.
 
-    Control commands (starting with '.') cannot have comments prepended,
-    so they are returned unchanged.
+    For regular queries the watermark is prepended. Control commands
+    (starting with ``'.'``) need the dot as the first character so
+    the Kusto engine can identify them as management commands;
+    therefore the watermark is appended at the end instead.
     """
+    watermark = build_watermark()
     if query.lstrip().startswith("."):
-        return query
-    return build_watermark() + query
+        return query + "\n" + watermark.rstrip("\n")
+    return watermark + query

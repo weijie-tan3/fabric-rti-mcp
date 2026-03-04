@@ -136,10 +136,11 @@ def test_destructive_operation_with_custom_client_request_properties(
     mock_get_kusto_connection.assert_called_once_with(sample_cluster_uri)
     mock_client.execute.assert_called_once()
 
-    # Verify database and command (control commands are not watermarked)
+    # Verify database and command (control commands have watermark appended)
     args = mock_client.execute.call_args[0]
     assert args[0] == database
-    assert args[1] == command
+    assert args[1].startswith(command)
+    assert "\n// " in args[1]
 
     # Verify ClientRequestProperties settings for destructive operation
     crp = mock_client.execute.call_args[0][2]

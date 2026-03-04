@@ -155,6 +155,29 @@ class TestAddWatermark:
         assert isinstance(data, dict)
         assert "fabric_rti_mcp_version" in data
 
+    def test_appends_watermark_to_control_command(self) -> None:
+        command = ".show tables"
+        result = add_watermark(command)
+        assert result.startswith(command)
+        lines = result.rsplit("\n", 1)
+        assert lines[0] == command
+        assert lines[1].startswith("// ")
+
+    def test_control_command_watermark_is_valid_json(self) -> None:
+        command = ".show tables"
+        result = add_watermark(command)
+        last_line = result.rsplit("\n", 1)[1]
+        json_str = last_line[3:]  # Strip "// " prefix
+        data = json.loads(json_str)
+        assert isinstance(data, dict)
+        assert "fabric_rti_mcp_version" in data
+
+    def test_control_command_with_leading_whitespace(self) -> None:
+        command = "  .show tables"
+        result = add_watermark(command)
+        assert result.startswith(command)
+        assert "\n// " in result
+
 
 class TestWatermarkIntegration:
     @patch("fabric_rti_mcp.services.kusto.kusto_service.get_kusto_connection")
