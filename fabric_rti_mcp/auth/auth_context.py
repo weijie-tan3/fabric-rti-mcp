@@ -1,3 +1,4 @@
+import os
 import time
 from contextvars import ContextVar
 from contextvars import Token as ContextToken
@@ -58,6 +59,23 @@ class BearerTokenCredential(TokenCredential):
         if not token:
             raise ValueError("No auth token available in request context")
         return AccessToken(token=token, expires_on=int(time.time()) + 3600)
+
+
+class TenantPinnedCredential(TokenCredential):
+    """Requests tokens from ``AZURE_TENANT_ID`` unless the caller asks for a specific tenant.
+
+    ``DefaultAzureCredential`` only applies ``AZURE_TENANT_ID`` to some of its credentials. Its Azure CLI,
+    Azure PowerShell, and Azure Developer CLI credentials use whatever tenant the tool is signed in to.
+    Passing ``tenant_id`` on each request makes every credential in the chain use the pinned tenant.
+    """
+
+    def __init__(self, credential: TokenCredential, tenant_id: str) -> None:
+        self._credential = credential
+        self._tenant_id = tenant_id
+
+    def get_token(self, *scopes: str, **kwargs: Any) -> AccessToken:
+        kwargs.setdefault("tenant_id", self._tenant_id)
+        return self._credential.get_token(*scopes, **kwargs)
 
 
 def _default_credential_kwargs(authority: str | None = None) -> dict[str, Any]:
@@ -133,7 +151,9 @@ def get_credential(token_target: TokenTarget, authority: str | None = None) -> T
     if credential_source is CredentialSource.MANAGED_IDENTITY:
         return ManagedIdentityCredential(client_id=obo_config.umi_client_id or None)
     if credential_source is CredentialSource.LOCAL_DEVELOPER:
-        return DefaultAzureCredential(**_default_credential_kwargs(authority))
+        credential = DefaultAzureCredential(**_default_credential_kwargs(authority))
+        tenant_id = os.environ.get("AZURE_TENANT_ID", "").strip()
+        return TenantPinnedCredential(credential, tenant_id) if tenant_id else credential
     raise ValueError(
         "No HTTP request bearer token is available. HTTP mode does not use local credentials by default. "
         "Set FABRIC_RTI_HTTP_ALLOW_MI=true to use Managed Identity fallback, or "

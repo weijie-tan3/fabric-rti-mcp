@@ -9,12 +9,18 @@ from mcp.shared.context import RequestContext
 from fabric_rti_mcp.auth.auth_context import (
     BearerTokenCredential,
     CredentialSource,
+    TenantPinnedCredential,
     TokenTarget,
     credential_source_cache_key,
     get_credential,
     resolve_credential_source,
     set_request_token,
 )
+
+
+@pytest.fixture(autouse=True)
+def clear_azure_tenant_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -107,6 +113,27 @@ class TestGetCredential:
             exclude_shared_token_cache_credential=True,
             exclude_interactive_browser_credential=False,
         )
+
+    def test_pins_default_azure_credential_to_azure_tenant_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        set_request_token(TokenTarget.KUSTO, None)
+        monkeypatch.setenv("AZURE_TENANT_ID", "pinned-tenant")
+        azure_credential = MagicMock()
+        monkeypatch.setattr(
+            "fabric_rti_mcp.auth.auth_context.DefaultAzureCredential", MagicMock(return_value=azure_credential)
+        )
+
+        credential = get_credential(TokenTarget.KUSTO)
+        credential.get_token("scope")
+
+        assert isinstance(credential, TenantPinnedCredential)
+        azure_credential.get_token.assert_called_once_with("scope", tenant_id="pinned-tenant")
+
+    def test_tenant_pinned_credential_keeps_explicit_tenant(self) -> None:
+        azure_credential = MagicMock()
+
+        TenantPinnedCredential(azure_credential, "pinned-tenant").get_token("scope", tenant_id="explicit-tenant")
+
+        azure_credential.get_token.assert_called_once_with("scope", tenant_id="explicit-tenant")
 
     def test_passes_authority_to_default_azure_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         set_request_token(TokenTarget.KUSTO, None)
