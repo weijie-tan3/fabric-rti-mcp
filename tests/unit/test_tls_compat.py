@@ -20,18 +20,28 @@ def test_apply_sets_openssl_conf(clean_env: None) -> None:
     assert pathlib.Path(config_path).is_file()
 
 
-def test_config_excludes_post_quantum_groups(clean_env: None) -> None:
+def test_config_demotes_but_keeps_post_quantum_groups(clean_env: None) -> None:
     _tls_compat.apply()
 
     contents = pathlib.Path(os.environ["OPENSSL_CONF"]).read_text()
-    assert "MLKEM" not in contents
-    assert f"Groups = {_tls_compat.CLASSICAL_GROUPS}" in contents
+    # The PQ group is retained so peers can still select it via HelloRetryRequest.
+    assert "X25519MLKEM768" in contents
+    assert f"Groups = {_tls_compat.PREFERRED_GROUPS}" in contents
+
+
+def test_post_quantum_group_is_never_first() -> None:
+    # OpenSSL sends a speculative key share for the leading group only. Kusto
+    # endpoints drop a ClientHello carrying an ML-KEM key share, so the PQ group
+    # must not lead.
+    groups = _tls_compat.PREFERRED_GROUPS.split(":")
+    assert "X25519MLKEM768" in groups
+    assert groups[0] != "X25519MLKEM768"
 
 
 def test_classical_group_list_prefers_secp256r1() -> None:
     # Kusto endpoints negotiate secp256r1; leading with it avoids a
     # HelloRetryRequest round trip.
-    assert _tls_compat.CLASSICAL_GROUPS.split(":")[0] == "secp256r1"
+    assert _tls_compat.PREFERRED_GROUPS.split(":")[0] == "secp256r1"
 
 
 def test_existing_openssl_conf_is_not_overridden(monkeypatch: pytest.MonkeyPatch) -> None:
