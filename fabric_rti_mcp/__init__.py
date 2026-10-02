@@ -1,3 +1,8 @@
+from fabric_rti_mcp import _tls_compat
+
+# Must run before any TLS connection is established. See _tls_compat for why.
+_tls_compat.apply()
+
 try:
     from importlib.metadata import version
 
