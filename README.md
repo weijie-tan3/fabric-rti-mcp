@@ -338,6 +338,7 @@ None - the server will work with default settings for demo purposes.
 | `KUSTO_KNOWN_SERVICES` | Kusto | JSON array of preconfigured Kusto services | None | `[{"service_uri":"https://cluster1.kusto.windows.net","default_database":"DB1","description":"Prod"}]` |
 | `KUSTO_EAGER_CONNECT` | Kusto | Whether to eagerly connect to default service on startup (not recommended) | `false` | `true` or `false` |
 | `KUSTO_ALLOW_UNKNOWN_SERVICES` | Kusto | Security setting to allow connections to services not in `KUSTO_KNOWN_SERVICES` | `true` | `true` or `false` |
+| `FABRIC_RTI_KUSTO_CUSTOM_WATERMARK` | Kusto | Opt-in toggle for query watermarking. When set (use `{}` for default-only), Kusto queries are prefixed with a JSON comment. Accepts a JSON object of custom key-value pairs to include. | Unset (no watermark) | `{}` or `{"team": "my-team", "app_id": "env:MY_APP_ID"}` |
 | `KUSTO_SHOTS_TABLE` | Kusto | Enable `kusto_get_shots` and set its default shots table | None | `MyDatabase.ShotsTable` |
 | `KUSTO_SHOTS_EMBEDDING_METHOD` | Kusto | Default embedding method for `kusto_get_shots` | `aoai` | `slm` or `aoai` |
 | `KUSTO_SHOTS_SLM_MODEL` | Kusto | Default SLM model for `kusto_get_shots` | `harrier-v1-270m` | `harrier-v1-270m` |
@@ -345,6 +346,7 @@ None - the server will work with default settings for demo purposes.
 | `FABRIC_BASE_URL` | Global | Base URL for Microsoft Fabric web interface | `https://fabric.microsoft.com` | `https://fabric.microsoft.com` |
 | `FABRIC_RTI_ALLOWED_TOOLS` | Global | Comma-separated service names or full tool names to expose | All tools | `kusto,map_get` |
 | `FABRIC_RTI_KUSTO_DEEPLINK_STYLE` | Kusto | Override auto-detection of deeplink style | None | `adx` or `fabric` |
+| `AZURE_TENANT_ID` | Global | Pin local (`stdio`) sign-in to one Microsoft Entra tenant. Every credential in the `DefaultAzureCredential` chain, including Azure CLI, requests tokens from this tenant. See [Pinning the tenant](#pinning-the-tenant). | Unset (each tool's signed-in tenant) | `398a6654-997b-47e9-b12b-9515b896b4de` |
 
 `FABRIC_RTI_ALLOWED_TOOLS` accepts service names derived from the registered `*_tools` modules and full tool names.
 
@@ -431,6 +433,36 @@ The `kusto_get_shots` tool retrieves shots that are most similar to your prompt 
 
 Existing AOAI calls remain backward compatible. When `embedding_method="slm"` is selected, `embedding_endpoint` is ignored.
 
+### Query Watermarking
+
+Kusto queries can be watermarked with a JSON comment containing the package version, current user, and any custom key-value pairs. **Watermarking is opt-in**: it is disabled by default and is enabled when either the `FABRIC_RTI_KUSTO_CUSTOM_WATERMARK` environment variable is set or the `--custom-watermark` CLI argument is passed (CLI takes priority). To enable watermarking without any custom entries, set the value to `{}`.
+
+Values can be:
+- **Literal strings** — used as-is, e.g. `"my-team"`
+- **`env:VAR_NAME`** — resolved from an environment variable at runtime, e.g. `"env:MY_APP_ID"`
+
+**Examples:**
+
+Enable with default fields only (version + user):
+```bash
+FABRIC_RTI_KUSTO_CUSTOM_WATERMARK='{}'
+```
+
+Enable with custom fields:
+```bash
+FABRIC_RTI_KUSTO_CUSTOM_WATERMARK='{"team": "data-eng", "app_id": "env:MY_APP_ID"}'
+```
+
+Or via CLI:
+```bash
+--custom-watermark '{"team": "data-eng", "app_id": "env:MY_APP_ID"}'
+```
+
+This produces a watermark like:
+```
+// {"fabric_rti_mcp_version": "0.1.0", "user": "alice", "app_id": "cool-app-123", "team": "data-eng"}
+```
+
 ## 🔑 Authentication
 
 In `stdio` mode (local), the MCP Server integrates with your host operating system's authentication mechanisms.
@@ -444,6 +476,19 @@ We use Azure Identity via [`DefaultAzureCredential`](https://learn.microsoft.com
 6. **Interactive Browser** (`InteractiveBrowserCredential`) - Falls back to browser-based login if needed
 
 If you're already logged in through any of these methods, the Fabric RTI MCP Server will automatically use those credentials in `stdio` mode.
+
+### Pinning the tenant
+
+If your account belongs to more than one Microsoft Entra tenant, set `AZURE_TENANT_ID` to the tenant that owns your Kusto cluster or Fabric workspace:
+
+```json
+"env": {
+  "KUSTO_SERVICE_URI": "https://mycluster.eastus.kusto.windows.net/",
+  "AZURE_TENANT_ID": "<tenant-id>"
+}
+```
+
+On its own, `DefaultAzureCredential` applies `AZURE_TENANT_ID` only to some credentials. Azure CLI, Azure PowerShell, and Azure Developer CLI use whichever tenant the tool is signed in to, so a user whose `az` is signed in to another tenant gets tokens the cluster rejects with `Principal '...;<other-tenant-id>' is not authorized`. This server passes `AZURE_TENANT_ID` on every token request, so every credential in the chain uses the pinned tenant: Azure CLI runs as `az account get-access-token --tenant <tenant-id>`. You still need to be signed in to that tenant with at least one method, for example `az login --tenant <tenant-id>`, or the browser fallback prompts you. A tenant passed explicitly by the Kusto client takes priority. `AZURE_TENANT_ID` doesn't affect HTTP mode, which uses the request's bearer token or managed identity.
 
 This MCP server is not intended to be exposed directly as a production HTTP endpoint.
 If you choose to run it over HTTP, the deployment must provide its own security boundary before requests reach this server.
