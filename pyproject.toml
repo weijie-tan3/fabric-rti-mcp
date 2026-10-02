@@ -86,6 +86,14 @@ ignore = [
 [tool.setuptools_scm]
 write_to = "fabric_rti_mcp/_version.py"
 
+[tool.pytest.ini_options]
+markers = [
+    "live: requires network access to a live endpoint (deselected by default)",
+]
+# Keep `make ci` and plain `pytest` offline. Run live checks with `pytest -m live`,
+# which overrides this because command-line -m is applied after addopts.
+addopts = "-m 'not live'"
+
 [dependency-groups]
 dev = [
     "pytest>=8.3.5",
